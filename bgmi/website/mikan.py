@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import List, Optional
 from xml.etree import ElementTree
 
+import re
 import bs4
 import yarl
 from bs4 import BeautifulSoup
@@ -408,3 +409,19 @@ class Mikanani(BaseWebsite):
             subtitle_group=info["subtitle_group"],
             episodes=parse_episodes(html, bangumi_id, subtitle_list),
         )
+
+    def get_single_bangumi_cover(self,bangumi_id: str) -> str:
+        html = get_text(server_root + f"Home/Bangumi/{bangumi_id}")
+        soup = BeautifulSoup(html, "html.parser")
+        bangumi_poster = soup.find_all("div", {"class": "bangumi-poster"})
+        cover_style = None
+        if bangumi_poster and len(bangumi_poster) > 0:
+            cover_style = bangumi_poster[0].get('style')
+        if not cover_style:
+            return None
+        url_match = re.search('url\(\'(.*)\?',cover_style,0)
+        if not url_match:
+            return None
+        url_path = url_match.group(1)
+        url = server_root + url_path.lstrip("/")
+        return url

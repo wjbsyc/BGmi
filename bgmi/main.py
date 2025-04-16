@@ -19,7 +19,7 @@ from bgmi.config import BGMI_PATH, CONFIG_FILE_PATH, Config, cfg, write_default_
 from bgmi.lib import controllers as ctl
 from bgmi.lib.constants import BANGUMI_UPDATE_TIME, SPACIAL_APPEND_CHARS, SPACIAL_REMOVE_CHARS, SUPPORT_WEBSITE
 from bgmi.lib.download import download_prepare
-from bgmi.lib.fetch import website
+from bgmi.lib.fetch import website,DATA_SOURCE_MAP
 from bgmi.lib.models import STATUS_DELETED, STATUS_FOLLOWED, STATUS_UPDATED, Bangumi, Filter, Followed, Subtitle
 from bgmi.lib.update import update_database
 from bgmi.script import ScriptRunner
@@ -305,6 +305,61 @@ def print_filter(followed_filter_obj: Filter) -> None:
     print(f"Exclude keywords: {followed_filter_obj.exclude}")
     print(f"Regular expression: {followed_filter_obj.regex}")
 
+@cli.command('old', help="add old bangumi, only support mikan now")
+@click.option("--bgmi-id",default=None,type=int,help="old bangumi mikan bangumi id")
+def old_bangumi(bgmi_id:int) -> None:
+    if not bgmi_id:
+        return
+    w: BaseWebsite = DATA_SOURCE_MAP["mikan_project"]()
+    bgmi_cover = w.get_single_bangumi_cover(str(bgmi_id))
+    if not bgmi_cover:
+        print("can't fetch cover from website")
+        return       
+    bangumi = w.fetch_single_bangumi(str(bgmi_id))
+    
+    if not bangumi:
+        print("can't fetch from website")
+        return
+    bangumi.cover = bgmi_cover
+    bangumi.status = 0
+    bangumi.name = bangumi.name.strip()
+    data = bangumi
+    
+    """save bangumi to database"""
+    b, obj_created = Bangumi.get_or_create(keyword=data.keyword, defaults=data.dict())
+    if not obj_created:
+        should_save = False
+        if data.cover and b.cover != data.cover:
+            b.cover = data.cover
+            should_save = True
+
+        if data.update_time not in ("Unknown", b.update_time):
+            b.update_time = data.update_time
+            should_save = True
+
+        subtitle_group = Bangumi(subtitle_group=data.subtitle_group).subtitle_group
+
+        if b.status != STATUS_UPDATING or b.subtitle_group != subtitle_group:
+            b.status = STATUS_UPDATING
+            if data.subtitle_group:
+                b.subtitle_group = subtitle_group
+            should_save = True
+
+        if should_save:
+            b.save()
+
+    for subtitle_group in data.subtitle_group:
+        (
+            Subtitle.insert(
+                {
+                    Subtitle.id: str(subtitle_group.id),
+                    Subtitle.name: str(subtitle_group.name),
+                }
+            ).on_conflict_replace()
+        ).execute()
+
+    print("add {} to database!".format(data.name))
+    return
 
 @cli.command("cal")
 @click.option(
